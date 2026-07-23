@@ -561,17 +561,40 @@ jobs:
         working-directory: ./global_chat_pc
         run: flutter build windows --release
 
-      - name: Create Clean PC Release Folder
-        run: |
-          mkdir pc_app_release
-          Copy-Item -Path "global_chat_pc/build/windows/x64/runner/Release/*" -Destination "pc_app_release/" -Recurse
+      - name: Install Inno Setup
+        run: choco install innosetup -y
 
-      - name: Zip Clean Release Folder
+      - name: Create Installer Script (.iss)
         run: |
-          Compress-Archive -Path "pc_app_release/*" -DestinationPath "PC-Global-Chat-App.zip"
+          Set-Content -Path "setup.iss" -Value @'
+          [Setup]
+          AppName=Global Wi-Fi Chat
+          AppVersion=1.0
+          DefaultDirName={autopf}\GlobalChat
+          DefaultGroupName=GlobalChat
+          UninstallDisplayIcon={app}\global_chat_pc.exe
+          Compression=lzma2
+          SolidCompression=yes
+          OutputDir=output
+          OutputBaseFilename=GlobalChat_PC_Setup
 
-      - name: Upload PC Build Artifact
+          [Files]
+          Source: "global_chat_pc\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+          [Icons]
+          Name: "{autoprograms}\Global Wi-Fi Chat"; Filename: "{app}\global_chat_pc.exe"
+          Name: "{autodesktop}\Global Wi-Fi Chat"; Filename: "{app}\global_chat_pc.exe"
+
+          [Run]
+          Filename: "{app}\global_chat_pc.exe"; Description: "Launch App"; Flags: nowait postinstall skipifsilent
+          '@
+
+      - name: Compile Installer .exe
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" setup.iss
+
+      - name: Upload Installer Executable
         uses: actions/upload-artifact@v4
         with:
-          name: PC-Global-Chat-App
-          path: PC-Global-Chat-App.zip
+          name: GlobalChat_PC_Setup.exe
+          path: output/GlobalChat_PC_Setup.exe
