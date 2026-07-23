@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-pc:
-    runs-on: windows-2019
+    runs-on: windows-latest
 
     steps:
       - name: Checkout Code
@@ -17,8 +17,7 @@ jobs:
       - name: Set up Flutter SDK
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.19.x'
-          channel: 'stable'
+          channel: 'stable' # Use latest stable to natively support VS 2022
 
       - name: Enable Windows Desktop Support
         run: flutter config --enable-windows-desktop
