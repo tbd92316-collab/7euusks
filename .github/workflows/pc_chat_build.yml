@@ -17,7 +17,7 @@ jobs:
       - name: Set up Flutter SDK
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable' # Use latest stable to natively support VS 2022
+          channel: 'stable'
 
       - name: Enable Windows Desktop Support
         run: flutter config --enable-windows-desktop
@@ -561,9 +561,14 @@ jobs:
         working-directory: ./global_chat_pc
         run: flutter build windows --release
 
-      - name: Zip PC App Build
+      - name: Create Clean PC Release Folder
         run: |
-          Compress-Archive -Path "global_chat_pc/build/windows/x64/runner/Release/*" -DestinationPath "PC-Global-Chat-App.zip"
+          mkdir pc_app_release
+          Copy-Item -Path "global_chat_pc/build/windows/x64/runner/Release/*" -Destination "pc_app_release/" -Recurse
+
+      - name: Zip Clean Release Folder
+        run: |
+          Compress-Archive -Path "pc_app_release/*" -DestinationPath "PC-Global-Chat-App.zip"
 
       - name: Upload PC Build Artifact
         uses: actions/upload-artifact@v4
