@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-pc:
-    runs-on: windows-latest
+    runs-on: windows-2019
 
     steps:
       - name: Checkout Code
@@ -29,7 +29,7 @@ jobs:
           flutter create --org com.globalchat --project-name global_chat_pc global_chat_pc
 
           # 2. Add Dependencies
-          Set-Content -Path "global_chat_pc/pubspec.yaml" -Value @"
+          Set-Content -Path "global_chat_pc/pubspec.yaml" -Value @'
           name: global_chat_pc
           description: "Offline Wi-Fi Global Chat App for PC"
           publish_to: 'none'
@@ -51,10 +51,10 @@ jobs:
 
           flutter:
             uses-material-design: true
-          "@
+          '@
 
           # 3. Create Main Flutter Code for PC
-          Set-Content -Path "global_chat_pc/lib/main.dart" -Value @"
+          Set-Content -Path "global_chat_pc/lib/main.dart" -Value @'
           import 'dart:async';
           import 'dart:convert';
           import 'dart:io';
@@ -264,7 +264,7 @@ jobs:
             Future<void> _startLocalServer() async {
               try {
                 final dir = await getApplicationDocumentsDirectory();
-                _hiddenHistoryFile = File('\${dir.path}/.chat_history.json');
+                _hiddenHistoryFile = File('${dir.path}/.chat_history.json');
                 if (!await _hiddenHistoryFile!.exists()) {
                   await _hiddenHistoryFile!.writeAsString(jsonEncode([]));
                 }
@@ -281,7 +281,7 @@ jobs:
                 setState(() {
                   messages.add({
                     "sender": "System",
-                    "text": "Server started on PC IP: \${widget.serverIp}:8080",
+                    "text": "Server started on PC IP: ${widget.serverIp}:8080",
                     "time": _currentTime()
                   });
                 });
@@ -331,11 +331,11 @@ jobs:
 
             Future<void> _connectToServer() async {
               try {
-                _clientWs = await WebSocket.connect('ws://\${widget.serverIp}:8080');
+                _clientWs = await WebSocket.connect('ws://${widget.serverIp}:8080');
 
                 var joinMsg = {
                   "sender": "System",
-                  "text": "\${widget.username} joined the chat",
+                  "text": "${widget.username} joined the chat",
                   "time": _currentTime()
                 };
                 _clientWs!.add(jsonEncode(joinMsg));
@@ -402,7 +402,7 @@ jobs:
 
             String _currentTime() {
               final now = DateTime.now();
-              return "\${now.hour.toString().padLeft(2, '0')}:\${now.minute.toString().padLeft(2, '0')}";
+              return "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
             }
 
             void _showErrorAndExit(String error) {
@@ -439,98 +439,120 @@ jobs:
 
             @override
             Widget build(BuildContext context) {
-              return Scaffold(
-                appBar: AppBar(
-                  title: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(widget.isHost ? "PC Host Server: \${widget.username}" : "Chat Board"),
-                      Text("IP: \${widget.serverIp}:8080", style: const TextStyle(fontSize: 12, color: Colors.greenAccent)),
-                    ],
-                  ),
-                ),
-                body: Column(
-                  children: [
-                    Expanded(
-                      child: ListView.builder(
-                        padding: const EdgeInsets.all(15),
-                        itemCount: messages.length,
-                        itemBuilder: (context, index) {
-                          var m = messages[index];
-                          bool isMe = m['sender'] == widget.username;
-                          bool isSystem = m['sender'] == 'System';
-
-                          if (isSystem) {
-                            return Container(
-                              margin: const EdgeInsets.symmetric(vertical: 8),
-                              alignment: Alignment.center,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                                decoration: BoxDecoration(color: Colors.grey[800], borderRadius: BorderRadius.circular(12)),
-                                child: Text(m['text'], style: const TextStyle(fontSize: 12, color: Colors.white70)),
-                              ),
-                            );
-                          }
-
-                          return Align(
-                            alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                            child: Container(
-                              margin: const EdgeInsets.symmetric(vertical: 4),
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: isMe ? Colors.blueAccent : Colors.grey[850],
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    m['sender'], 
-                                    style: TextStyle(
-                                      fontSize: 11, 
-                                      fontWeight: FontWeight.bold, 
-                                      color: isMe ? Colors.white70 : Colors.lightBlueAccent
-                                    )
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(m['text'], style: const TextStyle(fontSize: 15, color: Colors.white)),
-                                  const SizedBox(height: 2),
-                                  Text(m['time'], style: const TextStyle(fontSize: 9, color: Colors.white38)),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      color: Colors.grey[900],
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _msgController,
-                              onSubmitted: (_) => _sendMessage(),
-                              decoration: const InputDecoration(
-                                hintText: "Type a message...",
-                                border: InputBorder.none,
-                              ),
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.send, color: Colors.blueAccent),
-                            onPressed: _sendMessage,
-                          ),
+              return PopScope(
+                canPop: false,
+                onPopInvoked: (didPop) async {
+                  if (didPop) return;
+                  if (widget.isHost) {
+                    bool confirm = await showDialog(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text("Destroy Server?"),
+                        content: const Text("Closing will disconnect all joined clients."),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
+                          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text("Destroy")),
                         ],
                       ),
+                    ) ?? false;
+                    if (confirm && context.mounted) Navigator.pop(context);
+                  } else {
+                    Navigator.pop(context);
+                  }
+                },
+                child: Scaffold(
+                  appBar: AppBar(
+                    title: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(widget.isHost ? "PC Host Server: ${widget.username}" : "Chat Board"),
+                        Text("IP: ${widget.serverIp}:8080", style: const TextStyle(fontSize: 12, color: Colors.greenAccent)),
+                      ],
                     ),
-                  ],
+                  ),
+                  body: Column(
+                    children: [
+                      Expanded(
+                        child: ListView.builder(
+                          padding: const EdgeInsets.all(15),
+                          itemCount: messages.length,
+                          itemBuilder: (context, index) {
+                            var m = messages[index];
+                            bool isMe = m['sender'] == widget.username;
+                            bool isSystem = m['sender'] == 'System';
+
+                            if (isSystem) {
+                              return Container(
+                                margin: const EdgeInsets.symmetric(vertical: 8),
+                                alignment: Alignment.center,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                  decoration: BoxDecoration(color: Colors.grey[800], borderRadius: BorderRadius.circular(12)),
+                                  child: Text(m['text'], style: const TextStyle(fontSize: 12, color: Colors.white70)),
+                                ),
+                              );
+                            }
+
+                            return Align(
+                              alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                              child: Container(
+                                margin: const EdgeInsets.symmetric(vertical: 4),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: isMe ? Colors.blueAccent : Colors.grey[850],
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      m['sender'], 
+                                      style: TextStyle(
+                                        fontSize: 11, 
+                                        fontWeight: FontWeight.bold, 
+                                        color: isMe ? Colors.white70 : Colors.lightBlueAccent
+                                      )
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(m['text'], style: const TextStyle(fontSize: 15, color: Colors.white)),
+                                    const SizedBox(height: 2),
+                                    Text(m['time'], style: const TextStyle(fontSize: 9, color: Colors.white38)),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        color: Colors.grey[900],
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _msgController,
+                                onSubmitted: (_) => _sendMessage(),
+                                decoration: const InputDecoration(
+                                  hintText: "Type a message...",
+                                  border: InputBorder.none,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.send, color: Colors.blueAccent),
+                              onPressed: _sendMessage,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               );
             }
           }
-          "@
+          '@
 
       - name: Install Dependencies
         working-directory: ./global_chat_pc
