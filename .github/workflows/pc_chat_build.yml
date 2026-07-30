@@ -1037,8 +1037,42 @@ jobs:
           cd global_chat_pc_full
           flutter build windows --release
 
-      - name: Upload Windows EXE Artifact
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Build Setup Installer (.exe)
+        shell: bash
+        run: |
+          cat << 'EOF' > setup.iss
+          [Setup]
+          AppName=Global Wi-Fi Chat PC
+          AppVersion=1.0.0
+          DefaultDirName={autopf}\GlobalChatPC
+          DefaultGroupName=Global Wi-Fi Chat PC
+          OutputDir=output
+          OutputBaseFilename=GlobalChat_PC_Setup
+          Compression=lzma
+          SolidCompression=yes
+          ArchitecturesInstallIn64BitMode=x64
+
+          [Tasks]
+          Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
+          [Files]
+          Source: "global_chat_pc_full\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+          [Icons]
+          Name: "{group}\Global Wi-Fi Chat PC"; Filename: "{app}\global_chat_pc_full.exe"
+          Name: "{autodesktop}\Global Wi-Fi Chat PC"; Filename: "{app}\global_chat_pc_full.exe"; Tasks: desktopicon
+
+          [Run]
+          Filename: "{app}\global_chat_pc_full.exe"; Description: "{cm:LaunchProgram,Global Wi-Fi Chat PC}"; Flags: nowait postinstall skipifsilent
+          EOF
+
+          "C:/Program Files (x86)/Inno Setup 6/ISCC.exe" setup.iss
+
+      - name: Upload Installer EXE Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GlobalChat-PC-Full-App
-          path: global_chat_pc_full/build/windows/x64/runner/Release/
+          name: GlobalChat-PC-Installer-EXE
+          path: output/GlobalChat_PC_Setup.exe
