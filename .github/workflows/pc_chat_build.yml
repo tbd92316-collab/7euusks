@@ -78,7 +78,7 @@ jobs:
           import 'package:file_picker/file_picker.dart';
           import 'package:archive/archive_io.dart';
           import 'package:shared_preferences/shared_preferences.dart';
-          import 'package0:url_launcher/url_launcher.dart';
+          import 'package:url_launcher/url_launcher.dart';
           import 'package:video_player/video_player.dart';
           import 'package:audioplayers/audioplayers.dart';
 
@@ -1035,7 +1035,7 @@ jobs:
       - name: Build Windows EXE Release
         run: |
           cd global_chat_pc_full
-          flutter build windows --release -- -G "Visual Studio 17 2022"
+          flutter build windows --release
 
       - name: Upload Windows EXE Artifact
         uses: actions/upload-artifact@v4
