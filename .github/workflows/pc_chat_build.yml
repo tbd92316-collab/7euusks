@@ -15,6 +15,9 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Set up Visual Studio C++ Environment
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Set up Flutter SDK
         uses: subosito/flutter-action@v2
         with:
@@ -598,7 +601,6 @@ jobs:
                 var req = await client.getUrl(Uri.parse('http://${widget.serverIp}:8080/files/$fileId/${Uri.encodeComponent(fileName)}'));
                 var res = await req.close();
                 
-                // Windows Download directory path
                 final dir = await getDownloadsDirectory() ?? await getApplicationDocumentsDirectory();
                 String savePath = dir.path;
                 
