@@ -9,7 +9,7 @@ on:
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
       - name: Checkout Code
@@ -50,7 +50,6 @@ jobs:
             path_provider: ^2.1.2
             network_info_plus: ^5.0.1
             qr_flutter: ^4.1.0
-            mobile_scanner: ^5.1.1
             file_picker: ^8.0.0
             archive: ^4.0.2
             shared_preferences: ^2.2.2
@@ -76,11 +75,10 @@ jobs:
           import 'package:network_info_plus/network_info_plus.dart';
           import 'package:path_provider/path_provider.dart';
           import 'package:qr_flutter/qr_flutter.dart';
-          import 'package:mobile_scanner/mobile_scanner.dart';
           import 'package:file_picker/file_picker.dart';
           import 'package:archive/archive_io.dart';
           import 'package:shared_preferences/shared_preferences.dart';
-          import 'package:url_launcher/url_launcher.dart';
+          import 'package0:url_launcher/url_launcher.dart';
           import 'package:video_player/video_player.dart';
           import 'package:audioplayers/audioplayers.dart';
 
@@ -166,23 +164,6 @@ jobs:
               setState(() {
                 savedUsername = prefs.getString('saved_username') ?? "";
               });
-            }
-
-            void _scanQR() async {
-              try {
-                String? scannedIp = await Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const QRScannerScreen()),
-                );
-                if (scannedIp != null && scannedIp.isNotEmpty) {
-                  setState(() {
-                    _ipController.text = scannedIp;
-                  });
-                  _askUsernameAndProceed(false);
-                }
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("QR Scanner requires camera access.")));
-              }
             }
 
             void _askUsernameAndProceed(bool isHost) {
@@ -298,41 +279,9 @@ jobs:
                             onPressed: () => _askUsernameAndProceed(false),
                           ),
                         ),
-                        const SizedBox(height: 15),
-                        SizedBox(
-                          width: 320,
-                          height: 50,
-                          child: OutlinedButton.icon(
-                            icon: const Icon(Icons.qr_code_scanner),
-                            label: const Text("Scan QR Code", style: TextStyle(fontSize: 16)),
-                            onPressed: _scanQR,
-                          ),
-                        ),
                       ],
                     ),
                   ),
-                ),
-              );
-            }
-          }
-
-          class QRScannerScreen extends StatelessWidget {
-            const QRScannerScreen({super.key});
-
-            @override
-            Widget build(BuildContext context) {
-              return Scaffold(
-                appBar: AppBar(title: const Text("Scan Host QR Code")),
-                body: MobileScanner(
-                  onDetect: (capture) {
-                    final List<Barcode> barcodes = capture.barcodes;
-                    for (final barcode in barcodes) {
-                      if (barcode.rawValue != null) {
-                        Navigator.pop(context, barcode.rawValue);
-                        break;
-                      }
-                    }
-                  },
                 ),
               );
             }
@@ -654,7 +603,7 @@ jobs:
               showDialog(
                 context: context,
                 builder: (context) => AlertDialog(
-                  title: const Text("Scan to Join PC Chat"),
+                  title: const Text("Scan Host QR via Mobile App"),
                   content: SizedBox(
                     width: 230,
                     height: 230,
@@ -1086,7 +1035,7 @@ jobs:
       - name: Build Windows EXE Release
         run: |
           cd global_chat_pc_full
-          flutter build windows --release
+          flutter build windows --release -- -G "Visual Studio 17 2022"
 
       - name: Upload Windows EXE Artifact
         uses: actions/upload-artifact@v4
