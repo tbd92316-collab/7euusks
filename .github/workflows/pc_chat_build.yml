@@ -1,13 +1,14 @@
-name: Build PC Local Chat App (.exe)
+name: Build Full-Featured Windows PC App
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
-  build-pc:
+  build-windows:
     runs-on: windows-latest
 
     steps:
@@ -17,31 +18,42 @@ jobs:
       - name: Set up Flutter SDK
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.22.2'
           channel: 'stable'
+          cache: true
 
       - name: Enable Windows Desktop Support
         run: flutter config --enable-windows-desktop
 
-      - name: Generate PC Chat App
+      - name: Generate PC Full Chat App
+        shell: bash
         run: |
-          # 1. Create Flutter Project
-          flutter create --org com.globalchat --project-name global_chat_pc global_chat_pc
+          rm -rf global_chat_pc_full
+          flutter create global_chat_pc_full --platforms windows --org com.globalchat --project-name global_chat_pc_full
+          cd global_chat_pc_full
 
-          # 2. Add Dependencies
-          Set-Content -Path "global_chat_pc/pubspec.yaml" -Value @'
-          name: global_chat_pc
-          description: "Offline Wi-Fi Global Chat App for PC"
+          cat << 'EOF' > pubspec.yaml
+          name: global_chat_pc_full
+          description: "Global Wi-Fi Offline Chat PC Full App"
           publish_to: 'none'
           version: 1.0.0+1
 
           environment:
-            sdk: '>=3.0.0 <4.0.0'
+            sdk: '>=3.2.0 <4.0.0'
 
           dependencies:
             flutter:
               sdk: flutter
             path_provider: ^2.1.2
             network_info_plus: ^5.0.1
+            qr_flutter: ^4.1.0
+            mobile_scanner: ^5.1.1
+            file_picker: ^8.0.0
+            archive: ^4.0.2
+            shared_preferences: ^2.2.2
+            url_launcher: ^6.2.5
+            video_player: ^2.8.2
+            audioplayers: ^5.2.1
 
           dev_dependencies:
             flutter_test:
@@ -50,37 +62,61 @@ jobs:
 
           flutter:
             uses-material-design: true
-          '@
+          EOF
 
-          # 3. Create Main Flutter Code for PC
-          Set-Content -Path "global_chat_pc/lib/main.dart" -Value @'
+          mkdir -p lib
+          cat << 'EOF' > lib/main.dart
           import 'dart:async';
           import 'dart:convert';
           import 'dart:io';
           import 'package:flutter/material.dart';
           import 'package:network_info_plus/network_info_plus.dart';
           import 'package:path_provider/path_provider.dart';
+          import 'package:qr_flutter/qr_flutter.dart';
+          import 'package:mobile_scanner/mobile_scanner.dart';
+          import 'package:file_picker/file_picker.dart';
+          import 'package:archive/archive_io.dart';
+          import 'package:shared_preferences/shared_preferences.dart';
+          import 'package:url_launcher/url_launcher.dart';
+          import 'package:video_player/video_player.dart';
+          import 'package:audioplayers/audioplayers.dart';
 
           void main() {
-            runApp(const GlobalChatPCApp());
+            runApp(const GlobalChatApp());
           }
 
-          class GlobalChatPCApp extends StatelessWidget {
-            const GlobalChatPCApp({super.key});
+          class GlobalChatApp extends StatefulWidget {
+            const GlobalChatApp({super.key});
+
+            @override
+            State<GlobalChatApp> createState() => _GlobalChatAppState();
+          }
+
+          class _GlobalChatAppState extends State<GlobalChatApp> {
+            bool isDarkMode = true;
+
+            void toggleTheme() {
+              setState(() {
+                isDarkMode = !isDarkMode;
+              });
+            }
 
             @override
             Widget build(BuildContext context) {
               return MaterialApp(
                 debugShowCheckedModeBanner: false,
                 title: 'Global Wi-Fi Chat PC',
-                theme: ThemeData.dark(useMaterial3: true),
-                home: const HomeScreen(),
+                theme: isDarkMode ? ThemeData.dark(useMaterial3: true) : ThemeData.light(useMaterial3: true),
+                home: HomeScreen(toggleTheme: toggleTheme, isDarkMode: isDarkMode),
               );
             }
           }
 
           class HomeScreen extends StatefulWidget {
-            const HomeScreen({super.key});
+            final VoidCallback toggleTheme;
+            final bool isDarkMode;
+
+            const HomeScreen({super.key, required this.toggleTheme, required this.isDarkMode});
 
             @override
             State<HomeScreen> createState() => _HomeScreenState();
@@ -89,21 +125,26 @@ jobs:
           class _HomeScreenState extends State<HomeScreen> {
             final TextEditingController _ipController = TextEditingController();
             String myIp = "Detecting IP...";
+            String savedUsername = "";
 
             @override
             void initState() {
               super.initState();
               _fetchLocalIp();
+              _loadSavedUsername();
             }
 
             Future<void> _fetchLocalIp() async {
               try {
-                String? ip;
-                for (var interface in await NetworkInterface.list()) {
-                  for (var addr in interface.addresses) {
-                    if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
-                      ip = addr.address;
-                      break;
+                final info = NetworkInfo();
+                String? ip = await info.getWifiIP();
+                if (ip == null || ip.isEmpty) {
+                  for (var interface in await NetworkInterface.list()) {
+                    for (var addr in interface.addresses) {
+                      if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
+                        ip = addr.address;
+                        break;
+                      }
                     }
                   }
                 }
@@ -112,18 +153,42 @@ jobs:
                 });
               } catch (e) {
                 setState(() {
-                  myIp = "Unable to fetch IP";
+                  myIp = "127.0.0.1";
                 });
               }
             }
 
+            Future<void> _loadSavedUsername() async {
+              final prefs = await SharedPreferences.getInstance();
+              setState(() {
+                savedUsername = prefs.getString('saved_username') ?? "";
+              });
+            }
+
+            void _scanQR() async {
+              try {
+                String? scannedIp = await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const QRScannerScreen()),
+                );
+                if (scannedIp != null && scannedIp.isNotEmpty) {
+                  setState(() {
+                    _ipController.text = scannedIp;
+                  });
+                  _askUsernameAndProceed(false);
+                }
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("QR Scanner requires camera access.")));
+              }
+            }
+
             void _askUsernameAndProceed(bool isHost) {
-              TextEditingController nameController = TextEditingController();
+              TextEditingController nameController = TextEditingController(text: savedUsername);
               showDialog(
                 context: context,
                 barrierDismissible: false,
                 builder: (context) => AlertDialog(
-                  title: Text(isHost ? "Start Server as Host (PC)" : "Join Chat Board"),
+                  title: Text(isHost ? "Start Server as Host" : "Join Chat Board"),
                   content: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -152,23 +217,29 @@ jobs:
                       child: const Text("Cancel"),
                     ),
                     ElevatedButton(
-                      onPressed: () {
+                      onPressed: () async {
                         String name = nameController.text.trim();
                         if (name.isEmpty) return;
                         if (!isHost && _ipController.text.trim().isEmpty) return;
 
-                        Navigator.pop(context);
-                        
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => ChatScreen(
-                              isHost: isHost,
-                              username: name,
-                              serverIp: isHost ? myIp : _ipController.text.trim(),
+                        final prefs = await SharedPreferences.getInstance();
+                        await prefs.setString('saved_username', name);
+
+                        if (context.mounted) {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => ChatScreen(
+                                isHost: isHost,
+                                username: name,
+                                serverIp: isHost ? myIp : _ipController.text.trim(),
+                                toggleTheme: widget.toggleTheme,
+                                isDarkMode: widget.isDarkMode,
+                              ),
                             ),
-                          ),
-                        );
+                          );
+                        }
                       },
                       child: Text(isHost ? "Start" : "Join"),
                     ),
@@ -181,8 +252,14 @@ jobs:
             Widget build(BuildContext context) {
               return Scaffold(
                 appBar: AppBar(
-                  title: const Text("Global Offline Chat (PC Desktop)"),
+                  title: const Text("Global Offline Chat PC"),
                   centerTitle: true,
+                  actions: [
+                    IconButton(
+                      icon: Icon(widget.isDarkMode ? Icons.wb_sunny : Icons.nightlight_round),
+                      onPressed: widget.toggleTheme,
+                    )
+                  ],
                 ),
                 body: Padding(
                   padding: const EdgeInsets.all(24.0),
@@ -190,32 +267,42 @@ jobs:
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.computer, size: 100, color: Colors.blueAccent),
-                        const SizedBox(height: 20),
+                        const Icon(Icons.computer, size: 90, color: Colors.blueAccent),
+                        const SizedBox(height: 15),
                         Text(
-                          "Your PC IP Address: $myIp",
-                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.greenAccent),
+                          "Your IP: $myIp",
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.green),
                         ),
-                        const SizedBox(height: 40),
+                        const SizedBox(height: 35),
                         SizedBox(
                           width: 320,
-                          height: 55,
+                          height: 50,
                           child: ElevatedButton.icon(
                             style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
                             icon: const Icon(Icons.dns, color: Colors.white),
-                            label: const Text("Start Server (Host)", style: TextStyle(fontSize: 18, color: Colors.white)),
+                            label: const Text("Start Server (Host)", style: TextStyle(fontSize: 16, color: Colors.white)),
                             onPressed: () => _askUsernameAndProceed(true),
                           ),
                         ),
-                        const SizedBox(height: 20),
+                        const SizedBox(height: 15),
                         SizedBox(
                           width: 320,
-                          height: 55,
+                          height: 50,
                           child: ElevatedButton.icon(
                             style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
                             icon: const Icon(Icons.group_add, color: Colors.white),
-                            label: const Text("Join Chat Board", style: TextStyle(fontSize: 18, color: Colors.white)),
+                            label: const Text("Join Chat Board", style: TextStyle(fontSize: 16, color: Colors.white)),
                             onPressed: () => _askUsernameAndProceed(false),
+                          ),
+                        ),
+                        const SizedBox(height: 15),
+                        SizedBox(
+                          width: 320,
+                          height: 50,
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.qr_code_scanner),
+                            label: const Text("Scan QR Code", style: TextStyle(fontSize: 16)),
+                            onPressed: _scanQR,
                           ),
                         ),
                       ],
@@ -226,16 +313,42 @@ jobs:
             }
           }
 
+          class QRScannerScreen extends StatelessWidget {
+            const QRScannerScreen({super.key});
+
+            @override
+            Widget build(BuildContext context) {
+              return Scaffold(
+                appBar: AppBar(title: const Text("Scan Host QR Code")),
+                body: MobileScanner(
+                  onDetect: (capture) {
+                    final List<Barcode> barcodes = capture.barcodes;
+                    for (final barcode in barcodes) {
+                      if (barcode.rawValue != null) {
+                        Navigator.pop(context, barcode.rawValue);
+                        break;
+                      }
+                    }
+                  },
+                ),
+              );
+            }
+          }
+
           class ChatScreen extends StatefulWidget {
             final bool isHost;
             final String username;
             final String serverIp;
+            final VoidCallback toggleTheme;
+            final bool isDarkMode;
 
             const ChatScreen({
               super.key,
               required this.isHost,
               required this.username,
               required this.serverIp,
+              required this.toggleTheme,
+              required this.isDarkMode,
             });
 
             @override
@@ -246,9 +359,12 @@ jobs:
             HttpServer? _rawServer;
             List<Map<String, dynamic>> messages = [];
             final TextEditingController _msgController = TextEditingController();
-            File? _hiddenHistoryFile;
             List<WebSocket> connectedClients = [];
             WebSocket? _clientWs;
+            File? _tempHistoryFile;
+            
+            bool _isExiting = false;
+            bool _isUploading = false;
 
             @override
             void initState() {
@@ -262,49 +378,97 @@ jobs:
 
             Future<void> _startLocalServer() async {
               try {
-                final dir = await getApplicationDocumentsDirectory();
-                _hiddenHistoryFile = File('${dir.path}/.chat_history.json');
-                if (!await _hiddenHistoryFile!.exists()) {
-                  await _hiddenHistoryFile!.writeAsString(jsonEncode([]));
-                }
+                final dir = await getTemporaryDirectory();
+                _tempHistoryFile = File('${dir.path}/temp_chat.json');
+                await _tempHistoryFile!.writeAsString(jsonEncode([]));
 
                 _rawServer = await HttpServer.bind(InternetAddress.anyIPv4, 8080);
                 
                 _rawServer!.listen((HttpRequest request) async {
-                  if (WebSocketTransformer.isUpgradeRequest(request)) {
-                    WebSocket socket = await WebSocketTransformer.upgrade(request);
-                    _handleHostWebSocket(socket);
+                  try {
+                    if (WebSocketTransformer.isUpgradeRequest(request)) {
+                      WebSocket socket = await WebSocketTransformer.upgrade(request);
+                      _handleHostWebSocket(socket);
+                    } 
+                    else if (request.uri.path == '/upload') {
+                      String? fileId = request.uri.queryParameters['id'];
+                      if (fileId != null) {
+                        File f = File('${dir.path}/$fileId');
+                        var sink = f.openWrite();
+                        await sink.addStream(request);
+                        await sink.close();
+                        request.response.statusCode = 200;
+                        request.response.close();
+                      }
+                    } 
+                    else if (request.uri.pathSegments.isNotEmpty && request.uri.pathSegments.first == 'files') {
+                      String fileId = request.uri.pathSegments[1];
+                      File f = File('${dir.path}/$fileId');
+                      
+                      if (f.existsSync()) {
+                        String mimeType = 'application/octet-stream';
+                        if (request.uri.pathSegments.length > 2) {
+                          String fName = Uri.decodeComponent(request.uri.pathSegments[2]);
+                          String ext = fName.contains('.') ? fName.split('.').last.toLowerCase() : '';
+                          if (['png', 'jpg', 'jpeg', 'gif', 'webp'].contains(ext)) {
+                            mimeType = ext == 'jpg' ? 'image/jpeg' : 'image/$ext';
+                          } else if (ext == 'mp4' || ext == 'mkv') {
+                            mimeType = 'video/mp4';
+                          } else if (ext == 'mp3' || ext == 'wav') {
+                            mimeType = 'audio/mpeg';
+                          }
+                        }
+                        request.response.headers.set(HttpHeaders.contentTypeHeader, mimeType);
+                        await request.response.addStream(f.openRead());
+                        request.response.close();
+                      } else {
+                        request.response.statusCode = 404;
+                        request.response.close();
+                      }
+                    }
+                  } catch (e) {
+                    debugPrint("Server error: $e");
                   }
                 });
 
                 setState(() {
                   messages.add({
                     "sender": "System",
-                    "text": "Server started on PC IP: ${widget.serverIp}:8080",
+                    "text": "PC Server started by ${widget.username} at IP: ${widget.serverIp}:8080",
                     "time": _currentTime()
                   });
                 });
               } catch (e) {
-                _showErrorAndExit("Failed to start server: $e");
+                _showErrorAndExit("Failed to start PC server: $e");
               }
             }
 
             void _handleHostWebSocket(WebSocket socket) {
               connectedClients.add(socket);
+              socket.add(jsonEncode({"type": "history", "data": messages}));
 
               socket.listen((data) {
                 try {
-                  var msg = jsonDecode(data.toString());
-                  _broadcastMessage(msg);
-                  _saveMessageToFile(msg);
-
-                  setState(() {
-                    messages.add(msg);
-                  });
+                  var decoded = jsonDecode(data.toString());
+                  if (decoded['type'] == 'join') {
+                    String clientName = decoded['sender'];
+                    var sysMsg = {
+                      "sender": "System",
+                      "text": "$clientName joined the chat",
+                      "time": _currentTime()
+                    };
+                    _broadcastMessage(sysMsg);
+                    _saveAndAddMessage(sysMsg);
+                  } else {
+                    _broadcastMessage(decoded);
+                    _saveAndAddMessage(decoded);
+                  }
                 } catch (e) {
-                  debugPrint("Error parsing message: $e");
+                  debugPrint("WS error: $e");
                 }
               }, onDone: () {
+                connectedClients.remove(socket);
+              }, onError: (error) {
                 connectedClients.remove(socket);
               });
             }
@@ -316,15 +480,12 @@ jobs:
               }
             }
 
-            Future<void> _saveMessageToFile(Map<String, dynamic> msg) async {
-              if (_hiddenHistoryFile != null) {
-                try {
-                  List history = jsonDecode(await _hiddenHistoryFile!.readAsString());
-                  history.add(msg);
-                  await _hiddenHistoryFile!.writeAsString(jsonEncode(history));
-                } catch (e) {
-                  debugPrint("Error saving: $e");
-                }
+            Future<void> _saveAndAddMessage(Map<String, dynamic> msg) async {
+              setState(() {
+                messages.add(msg);
+              });
+              if (_tempHistoryFile != null) {
+                await _tempHistoryFile!.writeAsString(jsonEncode(messages));
               }
             }
 
@@ -332,18 +493,23 @@ jobs:
               try {
                 _clientWs = await WebSocket.connect('ws://${widget.serverIp}:8080');
 
-                var joinMsg = {
-                  "sender": "System",
-                  "text": "${widget.username} joined the chat",
+                _clientWs!.add(jsonEncode({
+                  "type": "join",
+                  "sender": widget.username,
                   "time": _currentTime()
-                };
-                _clientWs!.add(jsonEncode(joinMsg));
+                }));
 
                 _clientWs!.listen((data) {
-                  var msg = jsonDecode(data.toString());
-                  setState(() {
-                    messages.add(msg);
-                  });
+                  var decoded = jsonDecode(data.toString());
+                  if (decoded['type'] == 'history') {
+                    setState(() {
+                      messages = List<Map<String, dynamic>>.from(decoded['data']);
+                    });
+                  } else {
+                    setState(() {
+                      messages.add(decoded);
+                    });
+                  }
                 }, onDone: () {
                   _onServerDestroyed();
                 }, onError: (error) {
@@ -351,18 +517,18 @@ jobs:
                 });
 
               } catch (e) {
-                _showErrorAndExit("Could not connect to host. Check IP Address.");
+                _showErrorAndExit("Could not connect to PC host. Check IP.");
               }
             }
 
             void _onServerDestroyed() {
-              if (!mounted) return;
+              if (_isExiting || !mounted) return;
               showDialog(
                 context: context,
                 barrierDismissible: false,
                 builder: (context) => AlertDialog(
-                  title: const Text("Server Disconnected"),
-                  content: const Text("Host destroyed server"),
+                  title: const Text("Disconnected"),
+                  content: const Text("Host shut down the server."),
                   actions: [
                     ElevatedButton(
                       onPressed: () {
@@ -376,22 +542,21 @@ jobs:
               );
             }
 
-            void _sendMessage() {
+            void _sendMessage({String? fileId, String? fileName}) {
               String text = _msgController.text.trim();
-              if (text.isEmpty) return;
+              if (text.isEmpty && fileId == null) return;
 
               var msgData = {
                 "sender": widget.username,
                 "text": text,
+                "fileId": fileId,
+                "fileName": fileName,
                 "time": _currentTime()
               };
 
               if (widget.isHost) {
                 _broadcastMessage(msgData);
-                _saveMessageToFile(msgData);
-                setState(() {
-                  messages.add(msgData);
-                });
+                _saveAndAddMessage(msgData);
               } else {
                 _clientWs?.add(jsonEncode(msgData));
               }
@@ -399,12 +564,163 @@ jobs:
               _msgController.clear();
             }
 
+            void _pickAndSendFile() async {
+              FilePickerResult? result = await FilePicker.platform.pickFiles();
+              if (result != null && result.files.single.path != null) {
+                setState(() => _isUploading = true);
+                try {
+                  File file = File(result.files.single.path!);
+                  String fileName = result.files.single.name;
+                  String fileId = DateTime.now().millisecondsSinceEpoch.toString();
+
+                  if (widget.isHost) {
+                    final dir = await getTemporaryDirectory();
+                    await file.copy('${dir.path}/$fileId');
+                  } else {
+                    HttpClient client = HttpClient();
+                    var req = await client.postUrl(Uri.parse('http://${widget.serverIp}:8080/upload?id=$fileId'));
+                    await req.addStream(file.openRead());
+                    await req.close();
+                  }
+
+                  _sendMessage(fileId: fileId, fileName: fileName);
+                } catch(e) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("File transfer failed: $e")));
+                }
+                setState(() => _isUploading = false);
+              }
+            }
+
+            Future<void> _downloadFile(String fileId, String fileName) async {
+              try {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Downloading file to PC Downloads...")));
+                HttpClient client = HttpClient();
+                var req = await client.getUrl(Uri.parse('http://${widget.serverIp}:8080/files/$fileId/${Uri.encodeComponent(fileName)}'));
+                var res = await req.close();
+                
+                // Windows Download directory path
+                final dir = await getDownloadsDirectory() ?? await getApplicationDocumentsDirectory();
+                String savePath = dir.path;
+                
+                String baseName = fileName;
+                String ext = "";
+                if (fileName.contains('.')) {
+                  baseName = fileName.substring(0, fileName.lastIndexOf('.'));
+                  ext = fileName.substring(fileName.lastIndexOf('.'));
+                }
+
+                File file = File('$savePath/$fileName');
+                int counter = 1;
+                while (file.existsSync()) {
+                  file = File('$savePath/${baseName}_($counter)$ext');
+                  counter++;
+                }
+                
+                var sink = file.openWrite();
+                await sink.addStream(res);
+                await sink.close();
+
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Successfully Saved to PC Downloads!")));
+                }
+              } catch(e) {
+                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Download failed: $e")));
+              }
+            }
+
+            bool _canPreview(String fileName) {
+              String ext = fileName.contains('.') ? fileName.split('.').last.toLowerCase() : '';
+              return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4', 'mkv', 'mp3', 'wav', 'pdf'].contains(ext);
+            }
+
+            void _previewFile(String fileId, String fileName) {
+              String url = 'http://${widget.serverIp}:8080/files/$fileId/${Uri.encodeComponent(fileName)}';
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => AppPreviewScreen(url: url, fileName: fileName),
+                ),
+              );
+            }
+
             String _currentTime() {
               final now = DateTime.now();
               return "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
             }
 
+            void _showQRDialog() {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text("Scan to Join PC Chat"),
+                  content: SizedBox(
+                    width: 230,
+                    height: 230,
+                    child: Center(
+                      child: QrImageView(
+                        data: widget.serverIp,
+                        version: QrVersions.auto,
+                        size: 210.0,
+                        backgroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                  actions: [
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text("Close", style: TextStyle(color: Colors.white)),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            void _saveChatAsZip() async {
+              try {
+                final dir = await getDownloadsDirectory() ?? await getApplicationDocumentsDirectory();
+                final archive = Archive();
+                String jsonStr = jsonEncode(messages);
+                archive.addFile(ArchiveFile('chat_history.json', jsonStr.length, utf8.encode(jsonStr)));
+
+                var encoder = ZipEncoder();
+                var encodedZip = encoder.encode(archive);
+
+                File zipFile = File('${dir.path}/GlobalChat_PC_Backup_${DateTime.now().millisecondsSinceEpoch}.zip');
+                await zipFile.writeAsBytes(encodedZip!);
+
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("Chat saved to PC Downloads: ${zipFile.path.split(Platform.pathSeparator).last}"))
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("Failed to save ZIP: $e"))
+                  );
+                }
+              }
+            }
+
+            Future<void> _destroyServerAndExit() async {
+              _isExiting = true;
+              if (widget.isHost) {
+                for (var client in connectedClients) {
+                  client.close();
+                }
+                await _rawServer?.close(force: true);
+                if (_tempHistoryFile != null && await _tempHistoryFile!.exists()) {
+                  await _tempHistoryFile!.delete();
+                }
+              } else {
+                await _clientWs?.close();
+              }
+              if (mounted) Navigator.pop(context);
+            }
+
             void _showErrorAndExit(String error) {
+              _isExiting = true;
               showDialog(
                 context: context,
                 builder: (context) => AlertDialog(
@@ -426,10 +742,10 @@ jobs:
             @override
             void dispose() {
               if (widget.isHost) {
-                for (var client in connectedClients) {
-                  client.close();
-                }
                 _rawServer?.close(force: true);
+                if (_tempHistoryFile != null && _tempHistoryFile!.existsSync()) {
+                  _tempHistoryFile!.deleteSync();
+                }
               } else {
                 _clientWs?.close();
               }
@@ -446,17 +762,21 @@ jobs:
                     bool confirm = await showDialog(
                       context: context,
                       builder: (context) => AlertDialog(
-                        title: const Text("Destroy Server?"),
-                        content: const Text("Closing will disconnect all joined clients."),
+                        title: const Text("Stop Server?"),
+                        content: const Text("Closing will disconnect all users."),
                         actions: [
                           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
-                          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text("Destroy")),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                            onPressed: () => Navigator.pop(context, true), 
+                            child: const Text("Stop", style: TextStyle(color: Colors.white))
+                          ),
                         ],
                       ),
                     ) ?? false;
-                    if (confirm && context.mounted) Navigator.pop(context);
+                    if (confirm) await _destroyServerAndExit();
                   } else {
-                    Navigator.pop(context);
+                    await _destroyServerAndExit();
                   }
                 },
                 child: Scaffold(
@@ -464,16 +784,42 @@ jobs:
                     title: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(widget.isHost ? "PC Host Server: ${widget.username}" : "Chat Board"),
-                        Text("IP: ${widget.serverIp}:8080", style: const TextStyle(fontSize: 12, color: Colors.greenAccent)),
+                        Text(widget.isHost ? "Host PC: ${widget.username}" : "Chat Board"),
+                        Text("IP: ${widget.serverIp}:8080", style: const TextStyle(fontSize: 11, color: Colors.greenAccent)),
                       ],
                     ),
+                    actions: [
+                      if (widget.isHost)
+                        IconButton(
+                          icon: const Icon(Icons.qr_code),
+                          onPressed: _showQRDialog,
+                        ),
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.menu),
+                        onSelected: (val) {
+                          if (val == 'zip') _saveChatAsZip();
+                          if (val == 'theme') widget.toggleTheme();
+                        },
+                        itemBuilder: (context) => [
+                          if (widget.isHost)
+                            const PopupMenuItem(
+                              value: 'zip',
+                              child: Text("Save Chat History as ZIP"),
+                            ),
+                          const PopupMenuItem(
+                            value: 'theme',
+                            child: Text("Toggle Dark / Light Mode"),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                   body: Column(
                     children: [
+                      if (_isUploading) const LinearProgressIndicator(),
                       Expanded(
                         child: ListView.builder(
-                          padding: const EdgeInsets.all(15),
+                          padding: const EdgeInsets.all(12),
                           itemCount: messages.length,
                           itemBuilder: (context, index) {
                             var m = messages[index];
@@ -482,12 +828,12 @@ jobs:
 
                             if (isSystem) {
                               return Container(
-                                margin: const EdgeInsets.symmetric(vertical: 8),
+                                margin: const EdgeInsets.symmetric(vertical: 6),
                                 alignment: Alignment.center,
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                                  decoration: BoxDecoration(color: Colors.grey[800], borderRadius: BorderRadius.circular(12)),
-                                  child: Text(m['text'], style: const TextStyle(fontSize: 12, color: Colors.white70)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(color: Colors.grey[700], borderRadius: BorderRadius.circular(10)),
+                                  child: Text(m['text'], style: const TextStyle(fontSize: 11, color: Colors.white70)),
                                 ),
                               );
                             }
@@ -496,26 +842,72 @@ jobs:
                               alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                               child: Container(
                                 margin: const EdgeInsets.symmetric(vertical: 4),
-                                padding: const EdgeInsets.all(12),
+                                padding: const EdgeInsets.all(10),
                                 decoration: BoxDecoration(
-                                  color: isMe ? Colors.blueAccent : Colors.grey[850],
-                                  borderRadius: BorderRadius.circular(12),
+                                  color: isMe ? Colors.blueAccent : Colors.grey[800],
+                                  borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Column(
                                   crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      m['sender'], 
-                                      style: TextStyle(
-                                        fontSize: 11, 
-                                        fontWeight: FontWeight.bold, 
-                                        color: isMe ? Colors.white70 : Colors.lightBlueAccent
-                                      )
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(m['text'], style: const TextStyle(fontSize: 15, color: Colors.white)),
+                                    Text(m['sender'], style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white60)),
+                                    const SizedBox(height: 3),
+                                    if (m['text'] != null && m['text'].toString().isNotEmpty)
+                                      Text(m['text'], style: const TextStyle(fontSize: 14, color: Colors.white)),
+                                    
+                                    if (m['fileName'] != null)
+                                      Container(
+                                        margin: const EdgeInsets.only(top: 5),
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(8)),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(Icons.insert_drive_file, size: 16, color: Colors.white),
+                                                const SizedBox(width: 5),
+                                                Flexible(
+                                                  child: Text(m['fileName'], style: const TextStyle(fontSize: 12, color: Colors.amberAccent), overflow: TextOverflow.ellipsis),
+                                                ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                ElevatedButton.icon(
+                                                  style: ElevatedButton.styleFrom(
+                                                    backgroundColor: Colors.green,
+                                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                    minimumSize: const Size(0, 30),
+                                                  ),
+                                                  icon: const Icon(Icons.download, size: 14, color: Colors.white),
+                                                  label: const Text("Download", style: TextStyle(fontSize: 11, color: Colors.white)),
+                                                  onPressed: () => _downloadFile(m['fileId'], m['fileName']),
+                                                ),
+                                                if (_canPreview(m['fileName'])) ...[
+                                                  const SizedBox(width: 8),
+                                                  ElevatedButton.icon(
+                                                    style: ElevatedButton.styleFrom(
+                                                      backgroundColor: Colors.blue,
+                                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                      minimumSize: const Size(0, 30),
+                                                    ),
+                                                    icon: const Icon(Icons.visibility, size: 14, color: Colors.white),
+                                                    label: const Text("Preview", style: TextStyle(fontSize: 11, color: Colors.white)),
+                                                    onPressed: () => _previewFile(m['fileId'], m['fileName']),
+                                                  ),
+                                                ]
+                                              ],
+                                            )
+                                          ],
+                                        ),
+                                      ),
+                                    
                                     const SizedBox(height: 2),
-                                    Text(m['time'], style: const TextStyle(fontSize: 9, color: Colors.white38)),
+                                    Text(m['time'], style: const TextStyle(fontSize: 8, color: Colors.white38)),
                                   ],
                                 ),
                               ),
@@ -524,10 +916,14 @@ jobs:
                         ),
                       ),
                       Container(
-                        padding: const EdgeInsets.all(10),
-                        color: Colors.grey[900],
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        color: widget.isDarkMode ? Colors.black26 : Colors.grey[200],
                         child: Row(
                           children: [
+                            IconButton(
+                              icon: const Icon(Icons.attach_file, color: Colors.blueAccent),
+                              onPressed: _pickAndSendFile,
+                            ),
                             Expanded(
                               child: TextField(
                                 controller: _msgController,
@@ -540,7 +936,7 @@ jobs:
                             ),
                             IconButton(
                               icon: const Icon(Icons.send, color: Colors.blueAccent),
-                              onPressed: _sendMessage,
+                              onPressed: () => _sendMessage(),
                             ),
                           ],
                         ),
@@ -551,50 +947,147 @@ jobs:
               );
             }
           }
-          '@
 
-      - name: Install Dependencies
-        working-directory: ./global_chat_pc
-        run: flutter pub get
+          class AppPreviewScreen extends StatefulWidget {
+            final String url;
+            final String fileName;
 
-      - name: Build Windows Executable
-        working-directory: ./global_chat_pc
-        run: flutter build windows --release
+            const AppPreviewScreen({super.key, required this.url, required this.fileName});
 
-      - name: Install Inno Setup
-        run: choco install innosetup -y
+            @override
+            State<AppPreviewScreen> createState() => _AppPreviewScreenState();
+          }
 
-      - name: Create Installer Script (.iss)
+          class _AppPreviewScreenState extends State<AppPreviewScreen> {
+            VideoPlayerController? _videoController;
+            AudioPlayer? _audioPlayer;
+            bool isPlaying = false;
+            bool isLoadingMedia = true;
+
+            @override
+            void initState() {
+              super.initState();
+              _initMediaPreview();
+            }
+
+            void _initMediaPreview() async {
+              String ext = widget.fileName.contains('.') ? widget.fileName.split('.').last.toLowerCase() : '';
+              if (['mp4', 'mkv'].contains(ext)) {
+                _videoController = VideoPlayerController.networkUrl(Uri.parse(widget.url))
+                  ..initialize().then((_) {
+                    setState(() {
+                      isLoadingMedia = false;
+                    });
+                    _videoController!.play();
+                  });
+              } else if (['mp3', 'wav'].contains(ext)) {
+                _audioPlayer = AudioPlayer();
+                await _audioPlayer!.setSource(UrlSource(widget.url));
+                setState(() {
+                  isLoadingMedia = false;
+                });
+                _audioPlayer!.resume();
+                setState(() {
+                  isPlaying = true;
+                });
+                _audioPlayer!.onPlayerComplete.listen((_) {
+                  setState(() {
+                    isPlaying = false;
+                  });
+                });
+              } else {
+                setState(() {
+                  isLoadingMedia = false;
+                });
+              }
+            }
+
+            @override
+            void dispose() {
+              _videoController?.dispose();
+              _audioPlayer?.dispose();
+              super.dispose();
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              String ext = widget.fileName.contains('.') ? widget.fileName.split('.').last.toLowerCase() : '';
+              bool isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp'].contains(ext);
+              bool isVideo = ['mp4', 'mkv'].contains(ext);
+              bool isAudio = ['mp3', 'wav'].contains(ext);
+              bool isPdf = ext == 'pdf';
+
+              return Scaffold(
+                backgroundColor: Colors.black,
+                appBar: AppBar(
+                  backgroundColor: Colors.black,
+                  iconTheme: const IconThemeData(color: Colors.white),
+                  title: Text(widget.fileName, style: const TextStyle(color: Colors.white, fontSize: 16)),
+                ),
+                body: Center(
+                  child: isLoadingMedia
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : isImage
+                          ? InteractiveViewer(
+                              child: Image.network(widget.url),
+                            )
+                          : isVideo && _videoController != null && _videoController!.value.isInitialized
+                              ? AspectRatio(
+                                  aspectRatio: _videoController!.value.aspectRatio,
+                                  child: VideoPlayer(_videoController!),
+                                )
+                              : isAudio
+                                  ? Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        const Icon(Icons.audiotrack, size: 90, color: Colors.blueAccent),
+                                        const SizedBox(height: 20),
+                                        Text(widget.fileName, style: const TextStyle(color: Colors.white, fontSize: 16)),
+                                        const SizedBox(height: 30),
+                                        IconButton(
+                                          iconSize: 64,
+                                          color: Colors.white,
+                                          icon: Icon(isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled),
+                                          onPressed: () async {
+                                            if (isPlaying) {
+                                              await _audioPlayer!.pause();
+                                              setState(() => isPlaying = false);
+                                            } else {
+                                              await _audioPlayer!.resume();
+                                              setState(() => isPlaying = true);
+                                            }
+                                          },
+                                        )
+                                      ],
+                                    )
+                                  : isPdf
+                                      ? Column(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            const Icon(Icons.picture_as_pdf, size: 80, color: Colors.redAccent),
+                                            const SizedBox(height: 20),
+                                            const Text("PDF Ready to Open", style: TextStyle(color: Colors.white70, fontSize: 16)),
+                                            const SizedBox(height: 20),
+                                            ElevatedButton(
+                                              onPressed: () => launchUrl(Uri.parse(widget.url), mode: LaunchMode.externalApplication),
+                                              child: const Text("Open PDF in Browser"),
+                                            )
+                                          ],
+                                        )
+                                      : const Text("Preview not supported", style: TextStyle(color: Colors.white)),
+                ),
+              );
+            }
+          }
+          EOF
+
+      - name: Build Windows EXE Release
         run: |
-          Set-Content -Path "setup.iss" -Value @'
-          [Setup]
-          AppName=Global Wi-Fi Chat
-          AppVersion=1.0
-          DefaultDirName={autopf}\GlobalChat
-          DefaultGroupName=GlobalChat
-          UninstallDisplayIcon={app}\global_chat_pc.exe
-          Compression=lzma2
-          SolidCompression=yes
-          OutputDir=output
-          OutputBaseFilename=GlobalChat_PC_Setup
+          cd global_chat_pc_full
+          flutter build windows --release
 
-          [Files]
-          Source: "global_chat_pc\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-          [Icons]
-          Name: "{autoprograms}\Global Wi-Fi Chat"; Filename: "{app}\global_chat_pc.exe"
-          Name: "{autodesktop}\Global Wi-Fi Chat"; Filename: "{app}\global_chat_pc.exe"
-
-          [Run]
-          Filename: "{app}\global_chat_pc.exe"; Description: "Launch App"; Flags: nowait postinstall skipifsilent
-          '@
-
-      - name: Compile Installer .exe
-        run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" setup.iss
-
-      - name: Upload Installer Executable
+      - name: Upload Windows EXE Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GlobalChat_PC_Setup.exe
-          path: output/GlobalChat_PC_Setup.exe
+          name: GlobalChat-PC-Full-App
+          path: global_chat_pc_full/build/windows/x64/runner/Release/
